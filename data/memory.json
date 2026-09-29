@@ -1,0 +1,18 @@
+{
+  "users": {
+    "user-1": {
+      "facts": [],
+      "history": [
+        {
+          "role": "user",
+          "content": "[voice] hello RipoBot, how are you today"
+        },
+        {
+          "role": "assistant",
+          "content": "Hey ArminTest! Doing great, thanks for asking—ready to dive into some game chat or just chill? 😄"
+        }
+      ],
+      "updatedAt": "2026-09-28T09:43:20.267Z"
+    }
+  }
+}
