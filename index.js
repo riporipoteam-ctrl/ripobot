@@ -96,13 +96,9 @@ client.once('ready', async () => {
     const updateAll = async () => {
       for (const [, guild] of client.guilds.cache) {
         try {
-          // Only update if the category exists (was set up via /fluxstatus)
-          const category = guild.channels.cache.find(
-            (c) => c.type === 4 && c.name === 'Flux Rec Status'
-          );
-          if (category) {
-            await fluxstatus.updateStatusChannels(guild);
-          }
+          // Always run: updateStatusChannels is idempotent —
+          // creates the "Flux Rec Status" category if missing, updates if exists.
+          await fluxstatus.updateStatusChannels(guild);
         } catch (err) {
           console.error(`[fluxstatus] update failed for ${guild.name}:`, err.message);
         }
@@ -110,7 +106,9 @@ client.once('ready', async () => {
     };
     // Run every 5 minutes
     setInterval(updateAll, 5 * 60 * 1000);
-    console.log('[fluxstatus] auto-updater started (5 min interval)');
+    // Run once on startup (after 10s to let guild cache populate).
+    setTimeout(updateAll, 10000);
+    console.log('[fluxstatus] auto-updater started (5 min interval + startup run)');
   }
 });
 
