@@ -67,6 +67,32 @@ client.login(token).catch((err) => {
   process.exit(1);
 });
 
+// Flux Rec Status auto-updater — refreshes the "Flux Rec Status" category
+// channel names every 5 minutes with live player counts.
+client.once('ready', () => {
+  const fluxstatus = require('./commands/fluxstatus');
+  if (fluxstatus.updateStatusChannels) {
+    const updateAll = async () => {
+      for (const [, guild] of client.guilds.cache) {
+        try {
+          // Only update if the category exists (was set up via /fluxstatus)
+          const category = guild.channels.cache.find(
+            (c) => c.type === 4 && c.name === 'Flux Rec Status'
+          );
+          if (category) {
+            await fluxstatus.updateStatusChannels(guild);
+          }
+        } catch (err) {
+          console.error(`[fluxstatus] update failed for ${guild.name}:`, err.message);
+        }
+      }
+    };
+    // Run every 5 minutes
+    setInterval(updateAll, 5 * 60 * 1000);
+    console.log('[fluxstatus] auto-updater started (5 min interval)');
+  }
+});
+
 // Tiny health endpoint so hosts / keep-alive pings can see we're alive.
 const http = require('http');
 const port = Number(process.env.PORT) || 7860;
