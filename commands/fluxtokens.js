@@ -1,33 +1,12 @@
 'use strict';
 
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-
-const ADMIN_API = 'https://api.ripo-ripoteam.workers.dev/api/admin/v1';
-
-function isOwnerOrCoOwner(member) {
-  if (!member) return false;
-  if (member.id === member.guild.ownerId) return true;
-  const roles = member.roles.cache;
-  for (const [, role] of roles) {
-    const name = role.name.toLowerCase();
-    if (name.includes('owner') && !name.includes('co-owner')) return true;
-    if (name.includes('co-owner') || name.includes('coowner')) return true;
-  }
-  return false;
-}
-
-async function adminApi(path, method, body) {
-  const key = process.env.FLUXREC_ADMIN_KEY;
-  if (!key) throw new Error('Admin API key not configured');
-  const res = await fetch(`${ADMIN_API}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || `API error: ${res.status}`);
-  return data;
-}
+const {
+  isOwnerOrCoOwner,
+  adminApi,
+  isNoSuchPlayer,
+  confirmEveryoneTokens,
+} = require('../utils/flux');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -58,18 +37,30 @@ module.exports = {
 
     try {
       if (target.toLowerCase() === 'everyone') {
-        await adminApi('/tokens/grant', 'POST', { grant_to: 'everyone', amount });
-        await interaction.editReply({
-          content: `✅ Gave **${amount.toLocaleString()}** tokens to **everyone**! 🪙`,
-        });
-      } else {
-        await adminApi('/tokens/grant', 'POST', { username: target, amount });
-        await interaction.editReply({
-          content: `✅ Gave **${amount.toLocaleString()}** tokens to **${target}**! 🪙`,
-        });
+        // Destructive-adjacent: require an explicit button confirmation.
+        await confirmEveryoneTokens(
+          (payload) => interaction.followUp(payload),
+          interaction.user.id,
+          amount
+        );
+        return;
       }
+      // POST /api/admin/v1/tokens/grant { username, amount }
+      // -> { success, grantedTo, accounts: 1, amount, newBalance }
+      const result = await adminApi('/tokens/grant', 'POST', { username: target, amount });
+      const balance =
+        typeof result.newBalance === 'number'
+          ? `\nNew balance: **${result.newBalance.toLocaleString('en-US')}** 🪙`
+          : '';
+      await interaction.editReply({
+        content: `✅ Gave **${amount.toLocaleString('en-US')}** tokens to **${result.grantedTo}**! 🪙${balance}`,
+      });
     } catch (err) {
-      await interaction.editReply({ content: `❌ Failed: ${err.message}` });
+      await interaction.editReply({
+        content: isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${target}**.`
+          : `❌ Failed: ${err.message}`,
+      });
     }
   },
 };

@@ -8,9 +8,14 @@
  * Who can use it: members with the exact roles "👑 Owner" / "🛡️ Co-Owner".
  * The role check happens BEFORE the AI model is ever called.
  *
- * The owner's message is parsed by the HF chat model into a strict JSON
- * intent { action, args } where action ∈ announce|warn|timeout|poll|speak|none.
- * ban/kick/clear are NEVER available via natural language (mapped to "none").
+ * The owner's message is parsed by the chat model into a strict JSON
+ * intent { action, args } where action ∈ announce|warn|timeout|poll|speak|none
+ * plus the Flux Rec in-game admin actions:
+ * fluxrank|fluxranks|fluxplus|fluxban|fluxtimeout|fluxvoiceban|fluxunban|
+ * fluxbans|fluxtokens|fluxgift|fluxstatus|fluxonline.
+ * The flux* actions were explicitly ordered by the owner (2026-10-01) for
+ * in-game admin. Discord-native ban/kick/message-deleting are STILL never
+ * available via natural language (mapped to "none").
  * On success the bot replies with a short confirmation; on uncertainty it
  * stays silent.
  */
@@ -22,6 +27,14 @@ const { warnUser } = require('../commands/warn');
 const { timeoutUser, MAX_MINUTES } = require('../commands/timeout');
 const { postPoll } = require('../commands/poll');
 const { speakInVoiceChannel, VOICE_DOWN } = require('../commands/speak');
+const {
+  adminApi,
+  isNoSuchPlayer,
+  rankLabel,
+  FLUX_RANKS,
+  confirmEveryoneTokens,
+} = require('./flux');
+const { updateStatusChannels } = require('../commands/fluxstatus');
 
 function isOwnerOrCoOwner(member) {
   return !!member?.roles?.cache?.some((r) => OWNER_ROLE_NAMES.includes(r.name));
@@ -45,6 +58,10 @@ function channelAllowsNL(channel) {
 
 // Cheap pre-filter so normal owner chit-chat doesn't hit the model.
 const NL_HINT = /\b(announce|warn|timeout|mute|poll|speak|post|say)\b/i;
+// Flux Rec in-game admin triggers ("give Ripo6000 community mod",
+// "ban Ripo6000 griefing", "give everyone 500 tokens", ...).
+const FLUX_NL_HINT =
+  /\bflux\b|\brec\s*room\s*\+?|\bunban\b|\bvoice\s*-?ban\b|\blist\s+bans\b|\bplayers?\b.{0,20}\bonline\b|\bgive\b.{0,40}\btokens?\b|\bgive\b.{0,40}\bgifts?\b|\bgive\b.{0,40}\branks?\b|\branks?\s+(can\s+i\s+)?give\b|\bgive\b.{0,30}\b(community\s*-?mod|dev(eloper)?)\b|\bremove\b.{0,30}\b(community\s*-?mod|dev(eloper)?|rank)\b|\bban\b/i;
 
 /** Resolve a mention / id / name to a GuildMember, or null. */
 async function resolveMember(guild, ref) {
@@ -194,6 +211,269 @@ async function dispatchIntent(message, intent) {
     return true;
   }
 
+  // ---- Flux Rec in-game admin -------------------------------------------
+  // All of these hit the backend admin API (utils/flux.js) and are gated to
+  // Owner/Co-Owner by the caller. Usernames are Flux Rec player names — the
+  // backend 404s ("no such player") when the account doesn't exist in-game.
+
+  if (action === 'fluxranks') {
+    const list = FLUX_RANKS.map((r) => `**${r.label}**`).join(', ');
+    await message.reply(
+      `🎖️ Ranks I can give: ${list} — or \`remove\` to take a rank away.\n` +
+        'Say e.g. `give Ripo6000 community mod`.'
+    );
+    return true;
+  }
+
+  if (action === 'fluxrank') {
+    const username = String(args.user || '').trim();
+    if (!username) return true; // uncertain — stay silent
+    let rank = String(args.rank || '').trim().toLowerCase();
+    if (['community mod', 'community_mod', 'communitymod', 'mod', 'moderator'].includes(rank)) {
+      rank = 'community_mod';
+    } else if (['dev', 'developer'].includes(rank)) {
+      rank = 'developer';
+    } else if (['remove', 'none', 'take away', 'takeaway'].includes(rank)) {
+      rank = 'none';
+    } else {
+      rank = '';
+    }
+    if (!rank) {
+      await message.reply(
+        `🎖️ Which rank for **${username}**? Say \`community mod\`, \`dev\`, or \`remove\`.\n(e.g. \`give ${username} community mod\`)`
+      );
+      return true;
+    }
+    try {
+      // POST /api/admin/v1/ranks/set { username, rank } — 404 when no such player
+      const result = await adminApi('/ranks/set', 'POST', { username, rank });
+      await message.reply(
+        rank === 'none'
+          ? `✅ Rank removed from **${result.username}**. Takes effect on their next login.`
+          : `✅ **${result.username}** is now **${rankLabel(rank)}**! Takes effect on their next login.`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${username}**. Ranks only work on players who already made an account in-game.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxplus') {
+    const username = String(args.user || '').trim();
+    if (!username) return true; // uncertain — stay silent
+    let months = args.remove === true ? -1 : args.durationMonths;
+    months = months == null ? NaN : Math.trunc(Number(months));
+    if (!Number.isFinite(months)) {
+      await message.reply(
+        `🎫 How long should **${username}** get Flux Rec+? Say e.g. \`give ${username} flux rec+ 2 months\`, \`never expire\`, or \`remove\`.`
+      );
+      return true;
+    }
+    try {
+      // POST /api/admin/v1/membership/set { username, duration_months }
+      const result = await adminApi('/membership/set', 'POST', {
+        username,
+        duration_months: months,
+      });
+      let msg;
+      if (months === -1) {
+        msg = `✅ Flux Rec+ removed from **${result.username}**.`;
+      } else if (months === 0) {
+        msg = `✅ **${result.username}** now has **Flux Rec+ (never expires)**! 🎉`;
+      } else {
+        const until = result.plusUntil ? ` — until ${String(result.plusUntil).slice(0, 10)}` : '';
+        msg = `✅ **${result.username}** now has **Flux Rec+ for ${months} month${months > 1 ? 's' : ''}**${until}! 🎉`;
+      }
+      await message.reply(`${msg}\nTakes effect on their next login.`);
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${username}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxban' || action === 'fluxtimeout' || action === 'fluxvoiceban') {
+    const username = String(args.user || '').trim();
+    const reason = String(args.reason || '').trim();
+    if (!username) return true; // uncertain — stay silent
+    if (!reason) {
+      await message.reply(
+        `🔨 What's the reason for banning **${username}**? (The reason is shown to them in-game.)`
+      );
+      return true;
+    }
+    let durationMinutes =
+      args.durationMinutes == null ? 0 : Math.max(0, Math.trunc(Number(args.durationMinutes)) || 0);
+    if (action === 'fluxtimeout' && durationMinutes === 0) durationMinutes = 10;
+    const voiceBan = action === 'fluxvoiceban' ? true : args.voiceBan === true;
+    try {
+      // POST /api/admin/v1/bans/create { username, reason, duration_minutes, voice_ban }
+      // The ban is enforced by matchmaking and the reason shows on the
+      // in-game block screen (moderationBlockDetails / TopMessageOverride).
+      const result = await adminApi('/bans/create', 'POST', {
+        username,
+        reason,
+        duration_minutes: durationMinutes,
+        voice_ban: voiceBan,
+      });
+      const durText = result.permanent
+        ? 'permanently'
+        : `for ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`;
+      const voiceText = result.voiceBanned ? ' (including voice chat)' : '';
+      const icon = action === 'fluxtimeout' ? '⏱️' : action === 'fluxvoiceban' ? '🎙️🔨' : '🔨';
+      const verb =
+        action === 'fluxtimeout'
+          ? 'timed out in-game'
+          : action === 'fluxvoiceban'
+            ? 'voice-banned'
+            : 'banned';
+      await message.reply(
+        `${icon} **${result.username}** has been ${verb} ${durText}${voiceText}.\nReason (shown in-game): ${reason}`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${username}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxunban') {
+    const username = String(args.user || '').trim();
+    if (!username) return true; // uncertain — stay silent
+    try {
+      // POST /api/admin/v1/bans/lift { username } -> { lifted }
+      const result = await adminApi('/bans/lift', 'POST', { username });
+      await message.reply(
+        result.lifted
+          ? `✅ Ban lifted for **${result.username}**. They can play again now.`
+          : `ℹ️ **${username}** has no active ban — nothing to lift.`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${username}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxbans') {
+    try {
+      // GET /api/admin/v1/bans/list — see BACKEND_NEEDED.md (not on the backend yet)
+      const data = await adminApi('/bans/list', 'GET');
+      const bans = Array.isArray(data.bans) ? data.bans : [];
+      if (bans.length === 0) {
+        await message.reply('✅ No active bans right now.');
+        return true;
+      }
+      const lines = bans.slice(0, 25).map((b) => {
+        const until = b.permanent ? 'permanent' : b.banExpires ? `until ${b.banExpires}` : 'timed';
+        return `• **${b.username}** — ${until}${b.voiceBanned ? ' 🎙️' : ''}`;
+      });
+      await message.reply(`🔨 **Active bans (${bans.length}):**\n${lines.join('\n')}`);
+    } catch (err) {
+      await message.reply(
+        err && err.status === 404
+          ? 'ℹ️ The backend does not support ban listing yet. Use `/fluxunban <username>` to lift a specific ban.'
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxtokens') {
+    const target = String(args.user || '').trim();
+    const amount = Math.trunc(Number(args.amount));
+    if (!target || !Number.isFinite(amount) || amount < 1) {
+      await message.reply('🪙 Say e.g. `give Ripo6000 1000 tokens` or `give everyone 500 tokens`.');
+      return true;
+    }
+    if (amount > 1000000) {
+      await message.reply('🪙 Max 1,000,000 tokens per grant.');
+      return true;
+    }
+    try {
+      if (target.toLowerCase() === 'everyone') {
+        // Destructive-adjacent: button confirmation, 60s.
+        await confirmEveryoneTokens(
+          (payload) => message.reply(payload),
+          message.author.id,
+          amount
+        );
+        return true;
+      }
+      // POST /api/admin/v1/tokens/grant { username, amount } -> { grantedTo, newBalance }
+      const result = await adminApi('/tokens/grant', 'POST', { username: target, amount });
+      const balance =
+        typeof result.newBalance === 'number'
+          ? `\nNew balance: **${result.newBalance.toLocaleString('en-US')}** 🪙`
+          : '';
+      await message.reply(
+        `✅ Gave **${amount.toLocaleString('en-US')}** tokens to **${result.grantedTo}**! 🪙${balance}`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${target}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxgift') {
+    const username = String(args.user || '').trim() || 'them';
+    await message.reply(
+      `🎁 Gift grants aren't wired to the backend yet — I've flagged it for the backend build.\n` +
+        `For now you can send tokens: \`give ${username} 500 tokens\`.`
+    );
+    return true;
+  }
+
+  if (action === 'fluxstatus') {
+    try {
+      const { count, inRooms } = await updateStatusChannels(message.guild);
+      await message.reply(
+        `✅ **Flux Rec Status** refreshed: 🟢 **${count}** online · 🎮 **${inRooms}** in rooms.`
+      );
+    } catch (err) {
+      await message.reply(`❌ Failed: ${err.message}`);
+    }
+    return true;
+  }
+
+  if (action === 'fluxonline') {
+    try {
+      // GET /api/admin/v1/players/online -> { success, count, players: [{ username, room }] }
+      const data = await adminApi('/players/online', 'GET');
+      const count = data.count || 0;
+      const players = Array.isArray(data.players) ? data.players : [];
+      const names = players
+        .slice(0, 10)
+        .map((p) => (p.room ? `${p.username} (${p.room})` : p.username))
+        .join(', ');
+      await message.reply(
+        count === 0
+          ? '🟢 No players online right now.'
+          : `🟢 **${count}** player${count === 1 ? '' : 's'} online${names ? `: ${names}` : ''}.`
+      );
+    } catch (err) {
+      await message.reply(`❌ Failed: ${err.message}`);
+    }
+    return true;
+  }
+
   return true; // 'none' — consumed silently
 }
 
@@ -203,7 +483,7 @@ async function dispatchIntent(message, intent) {
  * false when it should fall through to normal chat handling.
  */
 async function tryNaturalLanguage(message) {
-  if (!NL_HINT.test(message.content)) return false;
+  if (!NL_HINT.test(message.content) && !FLUX_NL_HINT.test(message.content)) return false;
   if (!chatAvailable()) return false; // no model — let normal chat handle it
   if (!message.guild) return false;
 

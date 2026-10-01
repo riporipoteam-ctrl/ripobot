@@ -250,21 +250,59 @@ async function translateText(text, to = 'es') {
 /**
  * Parse a natural-language owner instruction into a structured intent.
  * Returns { action, args } or null when parsing fails.
- * action is one of: announce | warn | timeout | poll | speak | none.
+ * action is one of: announce | warn | timeout | poll | speak | none
+ *   | fluxrank | fluxranks | fluxplus | fluxban | fluxtimeout | fluxvoiceban
+ *   | fluxunban | fluxbans | fluxtokens | fluxgift | fluxstatus | fluxonline.
+ *
+ * The flux* actions are Flux Rec IN-GAME admin (explicitly ordered by the
+ * owner 2026-10-01). Discord-native ban/kick/message-deleting stay mapped to
+ * "none" — they are never available via natural language.
  */
-const NL_ACTIONS = new Set(['announce', 'warn', 'timeout', 'poll', 'speak', 'none']);
+const NL_ACTIONS = new Set([
+  'announce',
+  'warn',
+  'timeout',
+  'poll',
+  'speak',
+  'none',
+  'fluxrank',
+  'fluxranks',
+  'fluxplus',
+  'fluxban',
+  'fluxtimeout',
+  'fluxvoiceban',
+  'fluxunban',
+  'fluxbans',
+  'fluxtokens',
+  'fluxgift',
+  'fluxstatus',
+  'fluxonline',
+]);
 
 async function parseIntent(text) {
   const system = [
     'You are a command parser for a Discord server bot. The speaker is the server owner giving an instruction in plain English.',
     'Parse it into exactly one JSON object with this shape:',
-    '{"action": "announce|warn|timeout|poll|speak|none", "args": {...}}',
+    '{"action": "announce|warn|timeout|poll|speak|none|fluxrank|fluxranks|fluxplus|fluxban|fluxtimeout|fluxvoiceban|fluxunban|fluxbans|fluxtokens|fluxgift|fluxstatus|fluxonline", "args": {...}}',
     '- announce: {"channel": "#channel-name or mention exactly as written", "title": "short title, or empty string", "text": "announcement body"}',
     '- warn: {"user": "mention, id, or name exactly as written", "reason": "reason"}',
-    '- timeout: {"user": "mention, id, or name exactly as written", "durationMinutes": number (default 10), "reason": "reason"}',
+    '- timeout: {"user": "mention, id, or name exactly as written", "durationMinutes": number (default 10), "reason": "reason"} — a DISCORD server timeout of a server member (the target is usually @mentioned)',
     '- poll: {"question": "question", "options": ["2 to 4 short strings"]}',
     '- speak: {"text": "text to speak aloud in voice"}',
-    '- none: anything that is not one of the above. NEVER choose ban, kick, or deleting/clearing messages — those map to "none".',
+    'Flux Rec IN-GAME admin actions (target is a Flux Rec player username, written plainly, NOT a Discord @mention):',
+    '- fluxrank: {"user": "username exactly as written", "rank": "community_mod|developer|none, or empty string when not stated"} — e.g. "give Ripo6000 community mod", "give Ripo6000 dev", "remove Ripo6000\'s rank"',
+    '- fluxranks: {} — the owner asks what ranks they can give, e.g. "what ranks can I give"',
+    '- fluxplus: {"user": "username", "durationMonths": number|null, "remove": boolean} — e.g. "give Ripo6000 flux rec+ 1 month" (also "rec room+"), "never expire" means durationMonths 0, "take away his flux rec+" means remove true',
+    '- fluxban: {"user": "username", "reason": "reason", "durationMinutes": number|null (null = permanent), "voiceBan": boolean} — e.g. "ban Ripo6000 griefing in dorm"',
+    '- fluxtimeout: {"user": "username", "durationMinutes": number (default 10), "reason": "reason"} — an IN-GAME timeout of a Flux Rec player, e.g. "timeout Ripo6000 10 minutes spamming". Use this (NOT the Discord timeout) when the target is a plain game username.',
+    '- fluxvoiceban: {"user": "username", "reason": "reason", "durationMinutes": number|null} — e.g. "voiceban Ripo6000"',
+    '- fluxunban: {"user": "username"} — e.g. "unban Ripo6000"',
+    '- fluxbans: {} — e.g. "list bans"',
+    '- fluxtokens: {"user": "username or the word everyone", "amount": number} — e.g. "give Ripo6000 1000 tokens", "give everyone 500 tokens"',
+    '- fluxgift: {"user": "username"} — e.g. "give Ripo6000 a gift"',
+    '- fluxstatus: {} — e.g. "set up flux rec status"',
+    '- fluxonline: {} — e.g. "how many players are online"',
+    '- none: anything that is not one of the above. NEVER choose a Discord-native ban, kick, or deleting/clearing messages — those map to "none".',
     'Respond with ONLY the JSON object. No markdown fences, no explanation.',
   ].join('\n');
 

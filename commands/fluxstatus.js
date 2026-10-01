@@ -1,79 +1,100 @@
 'use strict';
 
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { isOwnerOrCoOwner, adminApi } = require('../utils/flux');
 
-const ADMIN_API = 'https://api.ripo-ripoteam.workers.dev/api/admin/v1';
+const STATUS_CATEGORY_NAME = 'Flux Rec Status';
+const ONLINE_PREFIX = '🟢';
+const ROOMS_PREFIX = '🎮';
 
-function isOwnerOrCoOwner(member) {
-  if (!member) return false;
-  if (member.id === member.guild.ownerId) return true;
-  const roles = member.roles.cache;
-  for (const [, role] of roles) {
-    const name = role.name.toLowerCase();
-    if (name.includes('owner') && !name.includes('co-owner')) return true;
-    if (name.includes('co-owner') || name.includes('coowner')) return true;
-  }
-  return false;
+/** Roles allowed to see the status category (Owner + Co-Owner, same gate as the commands). */
+function staffRoles(guild) {
+  return guild.roles.cache.filter((r) => {
+    const name = String(r.name || '').toLowerCase();
+    return name.includes('owner');
+  });
 }
 
-async function adminApi(path, method) {
-  const key = process.env.FLUXREC_ADMIN_KEY;
-  if (!key) throw new Error('Admin API key not configured');
-  const res = await fetch(`${ADMIN_API}${path}`, {
-    method,
-    headers: { 'X-Admin-Key': key },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || `API error: ${res.status}`);
-  return data;
+function categoryOverwrites(guild) {
+  const overwrites = [
+    {
+      id: guild.roles.everyone.id,
+      deny: [PermissionFlagsBits.ViewChannel],
+    },
+  ];
+  for (const [, role] of staffRoles(guild)) {
+    overwrites.push({
+      id: role.id,
+      allow: [PermissionFlagsBits.ViewChannel],
+    });
+  }
+  return overwrites;
 }
 
 /**
  * Update the Flux Rec Status channels with live player counts.
- * Called by /fluxstatus and by the periodic updater.
+ * Called by /fluxstatus and by the periodic updater in index.js.
+ * Idempotent: finds existing channels by emoji prefix and renames them,
+ * so reboots never duplicate anything.
  */
 async function updateStatusChannels(guild) {
-  try {
-    const data = await adminApi('/players/online', 'GET');
-    const count = data.count || 0;
+  // GET /api/admin/v1/players/online -> { success, count, players: [{ username, accountId, room, roomId }] }
+  const data = await adminApi('/players/online', 'GET');
+  const count = data.count || 0;
+  const players = Array.isArray(data.players) ? data.players : [];
+  const inRooms = players.filter((p) => p.roomId != null).length;
 
-    // Find or create the "Flux Rec Status" category
-    let category = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name === 'Flux Rec Status'
-    );
-    if (!category) {
-      category = await guild.channels.create({
-        name: 'Flux Rec Status',
-        type: ChannelType.GuildCategory,
-      });
+  // Find or create the "Flux Rec Status" category (private: staff-only view).
+  let category = guild.channels.cache.find(
+    (c) => c.type === ChannelType.GuildCategory && c.name === STATUS_CATEGORY_NAME
+  );
+  if (!category) {
+    category = await guild.channels.create({
+      name: STATUS_CATEGORY_NAME,
+      type: ChannelType.GuildCategory,
+      permissionOverwrites: categoryOverwrites(guild),
+    });
+  } else {
+    // Repair permissions on existing categories (older setups were visible to everyone).
+    try {
+      await category.permissionOverwrites.set(categoryOverwrites(guild));
+    } catch (err) {
+      console.error('[fluxstatus] could not fix category perms:', err.message);
     }
+  }
 
-    // Find or create the voice channels
-    let onlineChannel = guild.channels.cache.find(
-      (c) => c.parentId === category.id && c.name.startsWith('🟢')
+  const inCategory = (prefix) =>
+    guild.channels.cache.find(
+      (c) => c.parentId === category.id && String(c.name || '').startsWith(prefix)
     );
-    if (!onlineChannel) {
-      onlineChannel = await guild.channels.create({
-        name: `🟢 Online: ${count}`,
+
+  async function upsertVoice(prefix, name) {
+    let ch = inCategory(prefix);
+    if (!ch) {
+      ch = await guild.channels.create({
+        name,
         type: ChannelType.GuildVoice,
         parent: category.id,
-        permissionOverwrites: [
-          {
-            id: guild.roles.everyone.id,
-            deny: [PermissionFlagsBits.Connect],
-            allow: [PermissionFlagsBits.ViewChannel],
-          },
-        ],
+        // No explicit overwrites: voice channels inherit the category's
+        // staff-only permissions. Nobody can join them anyway (Connect is
+        // denied for @everyone via the category deny on ViewChannel).
       });
-    } else {
-      await onlineChannel.setName(`🟢 Online: ${count}`);
+    } else if (ch.name !== name) {
+      await ch.setName(name);
     }
-
-    return { count, category, onlineChannel };
-  } catch (err) {
-    console.error('[fluxstatus] update failed:', err.message);
-    throw err;
+    // Make sure a legacy channel keeps inheriting the private category perms.
+    try {
+      await ch.lockPermissions();
+    } catch {
+      // ignore — rename is the important part
+    }
+    return ch;
   }
+
+  const onlineChannel = await upsertVoice(ONLINE_PREFIX, `${ONLINE_PREFIX} Players Online: ${count}`);
+  const roomsChannel = await upsertVoice(ROOMS_PREFIX, `${ROOMS_PREFIX} In Rooms: ${inRooms}`);
+
+  return { count, inRooms, category, onlineChannel, roomsChannel };
 }
 
 module.exports = {
@@ -95,15 +116,18 @@ module.exports = {
     await interaction.deferReply({ ephemeral: true });
 
     try {
-      const { count } = await updateStatusChannels(interaction.guild);
+      const { count, inRooms } = await updateStatusChannels(interaction.guild);
       await interaction.editReply({
-        content: `✅ **Flux Rec Status** category created!\n🟢 Currently **${count}** players online.\nThe channel names will update automatically every 5 minutes.`,
+        content:
+          `✅ **Flux Rec Status** is live (private — only Owner/Co-Owner can see it).\n` +
+          `🟢 **${count}** players online · 🎮 **${inRooms}** in rooms.\n` +
+          `The channel names update automatically every 5 minutes.`,
       });
     } catch (err) {
       await interaction.editReply({ content: `❌ Failed: ${err.message}` });
     }
   },
 
-  // Export for the periodic updater
+  // Exported for the periodic updater
   updateStatusChannels,
 };
