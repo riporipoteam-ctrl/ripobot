@@ -1,93 +1,27 @@
-# BACKEND_NEEDED — Flux Rec admin API gaps (RipoBot)
+# Flux Rec admin API — RipoBot backend status
 
-RipoBot's 5 admin features are implemented bot-side. These backend endpoints
-are missing — the bot degrades gracefully (tells the owner the backend doesn't
-support it yet) until they exist. All live under `/api/admin/v1`, admin-key
-only (`X-Admin-Key`), same auth as the existing admin routes in
-`apps/api/src/routes/admin.ts`.
+All 5 RipoBot admin feature sets are implemented bot-side AND backend-side.
+All endpoints live under `/api/admin/v1`, admin-key only (`X-Admin-Key` header
+must equal the `ADMIN_API_KEY` env var), in `apps/api/src/routes/admin.ts`.
 
-Existing and used (verified live 2026-10-01, all return 401 without the key):
-- `POST /ranks/set` `{ username, rank: "community_mod"|"developer"|"none" }`
-- `POST /membership/set` `{ username, duration_months }` (-1 remove, 0 never expires)
-- `POST /bans/create` `{ username, reason, duration_minutes, voice_ban }`
-- `POST /bans/lift` `{ username }`
-- `POST /tokens/grant` `{ username|grant_to:"everyone", amount }`
-- `GET /players/online`
+| Feature | Endpoint | Notes |
+|---|---|---|
+| Set/remove rank | `POST /ranks/set` `{ username, rank: "community_mod"\|"developer"\|"none" }` | Backs `/role/*` + token role claims; takes effect on next login |
+| Search players | `GET /players/search?q=` | Case-insensitive prefix search, max 10; only real accounts, never invented |
+| Flux Rec+ membership | `POST /membership/set` `{ username, duration_months }` | 1, 2, … months; `0` = never expires; `-1` = remove |
+| Ban (reason shown in-game) | `POST /bans/create` `{ username, reason, duration_minutes, voice_ban? }` | `0` = permanent; reason shows on the in-game block screen via moderationBlockDetails |
+| Timeout | `POST /bans/create` with `duration_minutes > 0` | Timed ban lifts itself on expiry |
+| Voice ban (standalone) | `POST /voiceban/set` `{ username, duration_minutes }` | `0` = permanent, positive = timed, `-1` = remove. Account NOT banned — match worker refuses voice server only |
+| Lift ban (+voice) | `POST /bans/lift` `{ username }` | Clears voice ban too |
+| List bans | `GET /bans/list` | Bans currently in force, newest first |
+| Grant tokens | `POST /tokens/grant` `{ username\|grant_to:"everyone", amount }` | Max 1,000,000 per grant |
+| Grant gift box | `POST /gifts/grant` `{ username, gift_id? }` | Omit `gift_id` for the operator-configured default gift (OPERATOR_DEFAULT_GIFT_* vars) |
+| Who's online | `GET /players/online` | Live count + room per player; feeds the Discord "Flux Rec Status" channels |
 
-## 1. `GET /api/admin/v1/bans/list` — list active bans
+No gaps remain. The bot degrades gracefully (explicit error replies) if an
+endpoint ever 404s.
 
-Needed for: `/fluxbans` slash command and NL "list bans".
-The bot currently replies "the backend does not support ban listing yet".
-
-Expected response:
-```json
-{
-  "success": true,
-  "bans": [
-    {
-      "username": "Ripo6000",
-      "accountId": 123,
-      "reason": "griefing in dorm",
-      "permanent": false,
-      "banExpires": "2026-10-02T15:00:00.000Z",
-      "voiceBanned": false,
-      "voiceBanUntil": null,
-      "bannedAt": "2026-10-01T15:00:00.000Z"
-    }
-  ]
-}
-```
-`bans` should only include bans currently in force (exclude lifted/expired).
-Error shape on failure: `{ "success": false, "error": "<message>" }` like the
-other admin routes.
-
-## 2. `POST /api/admin/v1/gifts/grant` — grant a gift box to a player
-
-Needed for: NL "give Ripo6000 a gift".
-The bot currently replies that gift grants aren't wired yet.
-
-Expected request:
-```json
-{ "username": "Ripo6000", "gift_id": "optional-specific-gift-or-box-id" }
-```
-(`gift_id` optional — backend picks a default gift box when omitted.)
-
-Expected response:
-```json
-{
-  "success": true,
-  "username": "Ripo6000",
-  "accountId": 123,
-  "giftId": "the-granted-gift-id",
-  "note": "Gift appears in the player's inventory / gift box flow."
-}
-```
-404 `{ "success": false, "error": "no such player" }` when the username has no
-account — same convention as the other admin routes.
-
-## 3. `GET /api/admin/v1/players/lookup?username=<name>` — verify a player (nice-to-have)
-
-Not blocking: the bot currently relies on the 404 "no such player" from the
-set/grant endpoints to detect missing accounts. A dedicated lookup would let
-the bot confirm an account exists *before* applying a change, and show the
-owner the player's current rank/plus/balance in one glance.
-
-Expected response:
-```json
-{
-  "success": true,
-  "username": "Ripo6000",
-  "accountId": 123,
-  "isModerator": false,
-  "isDeveloper": false,
-  "hasPlus": true,
-  "plusUntil": "2026-11-01T00:00:00.000Z",
-  "tokenBalance": 1500
-}
-```
-404 when no account matches.
-
-## Notes for the backend implementer
+## Notes
 
 - Do NOT invent new rank values: the backend only knows
   `community_mod` / `developer` / `none` — if more ranks (e.g. "Event Host")

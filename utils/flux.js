@@ -86,6 +86,18 @@ function isNoSuchPlayer(err) {
   return err instanceof FluxApiError && err.status === 404;
 }
 
+/**
+ * Search Flux Rec accounts by username prefix (case-insensitive).
+ * GET /api/admin/v1/players/search?q= -> { success, players: [{ username, accountId, hasPlus, isModerator, isDeveloper }] }
+ * Only ever returns accounts that exist — never invents players.
+ */
+async function searchPlayers(q) {
+  const query = String(q || '').trim();
+  if (!query) return [];
+  const data = await adminApi(`/players/search?q=${encodeURIComponent(query)}`, 'GET');
+  return Array.isArray(data.players) ? data.players : [];
+}
+
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 /**
@@ -178,5 +190,6 @@ module.exports = {
   adminApi,
   FluxApiError,
   isNoSuchPlayer,
+  searchPlayers,
   confirmEveryoneTokens,
 };

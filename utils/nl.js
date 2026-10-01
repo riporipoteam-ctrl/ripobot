@@ -32,6 +32,7 @@ const {
   isNoSuchPlayer,
   rankLabel,
   FLUX_RANKS,
+  searchPlayers,
   confirmEveryoneTokens,
 } = require('./flux');
 const { updateStatusChannels } = require('../commands/fluxstatus');
@@ -244,9 +245,34 @@ async function dispatchIntent(message, intent) {
       );
       return true;
     }
+    // Search first: ranks only work on players who already have a Flux Rec
+    // account. GET /api/admin/v1/players/search never invents players.
+    let matches;
+    try {
+      matches = await searchPlayers(username);
+    } catch (err) {
+      await message.reply(`❌ Failed: ${err.message}`);
+      return true;
+    }
+    if (matches.length === 0) {
+      await message.reply(
+        `❌ No Flux Rec account named **${username}**. Ranks only work on players who already made an account in-game.`
+      );
+      return true;
+    }
+    const exact = matches.find((p) => p.username.toLowerCase() === username.toLowerCase());
+    if (!exact && matches.length > 1) {
+      const list = matches.map((p) => `**${p.username}**`).join(', ');
+      await message.reply(
+        `🎖️ Multiple players match **${username}**: ${list}.\n` +
+          `Say the exact username, e.g. \`give ${matches[0].username} ${rankLabel(rank)}\`.`
+      );
+      return true;
+    }
+    const target = (exact || matches[0]).username;
     try {
       // POST /api/admin/v1/ranks/set { username, rank } — 404 when no such player
-      const result = await adminApi('/ranks/set', 'POST', { username, rank });
+      const result = await adminApi('/ranks/set', 'POST', { username: target, rank });
       await message.reply(
         rank === 'none'
           ? `✅ Rank removed from **${result.username}**. Takes effect on their next login.`
@@ -255,7 +281,7 @@ async function dispatchIntent(message, intent) {
     } catch (err) {
       await message.reply(
         isNoSuchPlayer(err)
-          ? `❌ No Flux Rec account named **${username}**. Ranks only work on players who already made an account in-game.`
+          ? `❌ No Flux Rec account named **${target}**. Ranks only work on players who already made an account in-game.`
           : `❌ Failed: ${err.message}`
       );
     }
@@ -299,7 +325,37 @@ async function dispatchIntent(message, intent) {
     return true;
   }
 
-  if (action === 'fluxban' || action === 'fluxtimeout' || action === 'fluxvoiceban') {
+  if (action === 'fluxvoiceban') {
+    const username = String(args.user || '').trim();
+    if (!username) return true; // uncertain — stay silent
+    const durationMinutes =
+      args.durationMinutes == null ? 0 : Math.max(0, Math.trunc(Number(args.durationMinutes)) || 0);
+    try {
+      // POST /api/admin/v1/voiceban/set { username, duration_minutes } — standalone
+      // voice ban: the account is NOT banned, only voice chat is muted (the match
+      // worker refuses them a voice server). 0 = permanent.
+      const result = await adminApi('/voiceban/set', 'POST', {
+        username,
+        duration_minutes: durationMinutes,
+      });
+      const durText =
+        durationMinutes === 0
+          ? 'permanently'
+          : `for ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`;
+      await message.reply(
+        `🎙️🔨 **${result.username}** has been voice-banned ${durText}.\nThey can still play — they just can't use voice chat.`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${username}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
+    return true;
+  }
+
+  if (action === 'fluxban' || action === 'fluxtimeout') {
     const username = String(args.user || '').trim();
     const reason = String(args.reason || '').trim();
     if (!username) return true; // uncertain — stay silent
@@ -312,7 +368,7 @@ async function dispatchIntent(message, intent) {
     let durationMinutes =
       args.durationMinutes == null ? 0 : Math.max(0, Math.trunc(Number(args.durationMinutes)) || 0);
     if (action === 'fluxtimeout' && durationMinutes === 0) durationMinutes = 10;
-    const voiceBan = action === 'fluxvoiceban' ? true : args.voiceBan === true;
+    const voiceBan = args.voiceBan === true;
     try {
       // POST /api/admin/v1/bans/create { username, reason, duration_minutes, voice_ban }
       // The ban is enforced by matchmaking and the reason shows on the
@@ -327,13 +383,8 @@ async function dispatchIntent(message, intent) {
         ? 'permanently'
         : `for ${durationMinutes} minute${durationMinutes === 1 ? '' : 's'}`;
       const voiceText = result.voiceBanned ? ' (including voice chat)' : '';
-      const icon = action === 'fluxtimeout' ? '⏱️' : action === 'fluxvoiceban' ? '🎙️🔨' : '🔨';
-      const verb =
-        action === 'fluxtimeout'
-          ? 'timed out in-game'
-          : action === 'fluxvoiceban'
-            ? 'voice-banned'
-            : 'banned';
+      const icon = action === 'fluxtimeout' ? '⏱️' : '🔨';
+      const verb = action === 'fluxtimeout' ? 'timed out in-game' : 'banned';
       await message.reply(
         `${icon} **${result.username}** has been ${verb} ${durText}${voiceText}.\nReason (shown in-game): ${reason}`
       );
@@ -370,7 +421,7 @@ async function dispatchIntent(message, intent) {
 
   if (action === 'fluxbans') {
     try {
-      // GET /api/admin/v1/bans/list — see BACKEND_NEEDED.md (not on the backend yet)
+      // GET /api/admin/v1/bans/list -> { bans: [...] } (bans currently in force)
       const data = await adminApi('/bans/list', 'GET');
       const bans = Array.isArray(data.bans) ? data.bans : [];
       if (bans.length === 0) {
