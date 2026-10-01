@@ -69,7 +69,28 @@ client.login(token).catch((err) => {
 
 // Flux Rec Status auto-updater — refreshes the "Flux Rec Status" category
 // channel names every 5 minutes with live player counts.
-client.once('ready', () => {
+client.once('ready', async () => {
+  // Auto-register slash commands on startup (so new commands deploy without manual deploy-commands.js)
+  try {
+    const { REST, Routes } = require('discord.js');
+    const clientId = process.env.CLIENT_ID;
+    const guildId = process.env.GUILD_ID;
+    if (clientId && guildId) {
+      const commands = [];
+      const commandsPath = path.join(__dirname, 'commands');
+      for (const file of fs.readdirSync(commandsPath).filter((f) => f.endsWith('.js'))) {
+        try {
+          const cmd = require(path.join(commandsPath, file));
+          if (cmd?.data?.toJSON) commands.push(cmd.data.toJSON());
+        } catch {}
+      }
+      const rest = new REST().setToken(token);
+      await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+      console.log(`[slash] auto-registered ${commands.length} guild commands`);
+    }
+  } catch (err) {
+    console.error('[slash] auto-registration failed:', err.message);
+  }
   const fluxstatus = require('./commands/fluxstatus');
   if (fluxstatus.updateStatusChannels) {
     const updateAll = async () => {
