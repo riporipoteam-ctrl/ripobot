@@ -433,11 +433,24 @@ async function dispatchIntent(message, intent) {
   }
 
   if (action === 'fluxgift') {
-    const username = String(args.user || '').trim() || 'them';
-    await message.reply(
-      `🎁 Gift grants aren't wired to the backend yet — I've flagged it for the backend build.\n` +
-        `For now you can send tokens: \`give ${username} 500 tokens\`.`
-    );
+    const target = String(args.user || '').trim();
+    if (!target) {
+      await message.reply('🎁 Say e.g. `give Ripo6000 a gift`.');
+      return true;
+    }
+    try {
+      // POST /api/admin/v1/gifts/grant { username } -> { username, giftId }
+      const result = await adminApi('/gifts/grant', 'POST', { username: target });
+      await message.reply(
+        `🎁 Gift box sent to **${result.username}** — they'll find it in their gifts in-game!`
+      );
+    } catch (err) {
+      await message.reply(
+        isNoSuchPlayer(err)
+          ? `❌ No Flux Rec account named **${target}**.`
+          : `❌ Failed: ${err.message}`
+      );
+    }
     return true;
   }
 
