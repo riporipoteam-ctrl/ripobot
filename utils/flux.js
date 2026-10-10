@@ -33,9 +33,19 @@ function rankLabel(value) {
  * Owner or Co-Owner check (same pattern as commands/flux*.js):
  * the guild owner always qualifies, otherwise a role whose name contains
  * "owner" (covers 👑 Owner and 🛡️ Co-Owner).
+ *
+ * Also honors BOT_OWNERS env var (comma-separated Discord user IDs) as a
+ * bulletproof fallback — R6/ripo6000 is always authorized even if the
+ * guild.ownerId check or role names don't match.
  */
 function isOwnerOrCoOwner(member) {
   if (!member) return false;
+  // Hardcoded bot owners (e.g. R6) — never blocked
+  const botOwners = String(process.env.BOT_OWNERS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (botOwners.includes(member.id)) return true;
   if (member.id === member.guild.ownerId) return true;
   const roles = member.roles.cache;
   for (const [, role] of roles) {
