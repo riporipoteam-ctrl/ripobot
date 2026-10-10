@@ -221,3 +221,4 @@ ripo-bot/
   but a rebuild/restart of the Space resets them.
 - AI replies are chunked to Discord's 2000-character limit.
 - No tokens are ever logged. Never commit `.env`.
+# v7.9 rebuild trigger
