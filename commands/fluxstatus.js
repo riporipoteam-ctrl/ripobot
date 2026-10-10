@@ -17,13 +17,10 @@ function staffRoles(guild) {
 }
 
 function categoryOverwrites(guild) {
-  // v7.8: Everyone can SEE the status (Armin's order) — but cannot join the
-  // voice channels (they're status displays, not real voice channels).
   const overwrites = [
     {
       id: guild.roles.everyone.id,
-      allow: [PermissionFlagsBits.ViewChannel],
-      deny: [PermissionFlagsBits.Connect],
+      deny: [PermissionFlagsBits.ViewChannel],
     },
   ];
   for (const [, role] of staffRoles(guild)) {
