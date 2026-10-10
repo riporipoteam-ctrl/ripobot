@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { isOwnerOrCoOwner, adminApi } = require('../utils/flux');
+const { normalizeChannelName } = require('../utils/modreport');
 
 const STATUS_CATEGORY_NAME = 'Flux Rec Status';
 const ONLINE_PREFIX = '🟢';
@@ -45,8 +46,11 @@ async function updateStatusChannels(guild) {
   const inRooms = players.filter((p) => p.roomId != null).length;
 
   // Find or create the "Flux Rec Status" category (private: staff-only view).
+  // v7.6: normalized name match — the category may be decorated/renamed
+  // (e.g. "✦ FLUX REC STATUS ✦"); exact matching would create a duplicate.
+  const wantCategory = normalizeChannelName(STATUS_CATEGORY_NAME);
   let category = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name === STATUS_CATEGORY_NAME
+    (c) => c.type === ChannelType.GuildCategory && normalizeChannelName(c.name) === wantCategory
   );
   if (!category) {
     category = await guild.channels.create({

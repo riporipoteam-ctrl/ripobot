@@ -2,6 +2,7 @@
 
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { isOwnerOrCoOwner, adminApi } = require('../utils/flux');
+const { normalizeChannelName } = require('../utils/modreport');
 
 const CATEGORY_NAME = '| Server Status |';
 
@@ -34,9 +35,11 @@ async function checkGameServer() {
  * Idempotent: finds existing channels by emoji prefix and renames them.
  */
 async function setupStatusChannels(guild) {
-  // Find or create the category (visible to everyone, read-only channels inside)
+  // Find or create the category (visible to everyone, read-only channels inside).
+  // v7.6: normalized name match so later decoration/renames don't duplicate it.
+  const wantCategory = normalizeChannelName(CATEGORY_NAME);
   let category = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name === CATEGORY_NAME
+    (c) => c.type === ChannelType.GuildCategory && normalizeChannelName(c.name) === wantCategory
   );
   if (!category) {
     category = await guild.channels.create({

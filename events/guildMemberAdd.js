@@ -16,6 +16,7 @@
 const { Events } = require('discord.js');
 const { findChannelByName, normalizeChannelName } = require('../utils/modreport');
 const { buildWelcomeEmbed } = require('../utils/welcomeCard');
+const badges = require('../utils/badges');
 
 /** Find the Member role (tolerates emoji/punctuation prefixes). */
 function findMemberRole(guild) {
@@ -43,6 +44,15 @@ module.exports = {
       }
     } catch (err) {
       console.error('[guildMemberAdd] member role assign failed:', err.message);
+    }
+
+    // Nickname badge: a badged user (or role badge via auto Member role)
+    // gets their emoji badge on join. Silent on failure.
+    try {
+      const res = await badges.applyBadge(member);
+      if (res === 'applied') console.log(`[badges] applied badge for ${member.user.tag} on join`);
+    } catch (err) {
+      console.error('[guildMemberAdd] badge apply failed:', err.message);
     }
 
     try {

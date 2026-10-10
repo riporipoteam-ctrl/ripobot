@@ -46,7 +46,7 @@ function buildWelcomeEmbed({ member, memberCount, joinedAtMs }) {
     .setThumbnail(avatar)
     .setDescription(
       `${quip}\n\n` +
-        "We're **Ripo Team** — the gaming tech crew building **Flux Rec**, our private Rec Room revival. " +
+        'Welcome to **Flux Rec** — the private Rec Room revival, built by **Ripo Team**. ' +
         'Kick back, meet the squad, and have fun!\n\u200b',
     )
     .addFields(
