@@ -95,21 +95,28 @@ async function updateStatusChannels(guild) {
       (c) => c.parentId === category.id && String(c.name || '').startsWith(prefix)
     );
 
-  async function upsertVoice(prefix, name) {
-    let ch = inCategory(prefix);
+  // v7.9: find status channels by their label, not emoji prefix — the emoji
+  // changes with the count (🔴 when 0, 🟢 otherwise).
+  const inCategoryByLabel = (label) =>
+    guild.channels.cache.find(
+      (c) => c.parentId === category.id && String(c.name || '').includes(label)
+    );
+
+  async function upsertVoice(prefix, name, label) {
+    let ch = inCategoryByLabel(label);
     if (!ch) {
       ch = await guild.channels.create({
         name,
         type: ChannelType.GuildVoice,
         parent: category.id,
         // No explicit overwrites: voice channels inherit the category's
-        // staff-only permissions. Nobody can join them anyway (Connect is
-        // denied for @everyone via the category deny on ViewChannel).
+        // permissions. Nobody can join them anyway (Connect is denied
+        // for @everyone at the category level).
       });
     } else if (ch.name !== name) {
       await ch.setName(name);
     }
-    // Make sure a legacy channel keeps inheriting the private category perms.
+    // Make sure a legacy channel keeps inheriting the category perms.
     try {
       await ch.lockPermissions();
     } catch {
@@ -118,8 +125,11 @@ async function updateStatusChannels(guild) {
     return ch;
   }
 
-  const onlineChannel = await upsertVoice(ONLINE_PREFIX, `${ONLINE_PREFIX} Players Online: ${count}`);
-  const roomsChannel = await upsertVoice(ROOMS_PREFIX, `${ROOMS_PREFIX} In Rooms: ${inRooms}`);
+  // v7.9: 🔴 when nobody is online, 🟢 otherwise (Armin's order).
+  const onlineEmoji = count > 0 ? '🟢' : '🔴';
+  const roomsEmoji = inRooms > 0 ? '🎮' : '🎮';
+  const onlineChannel = await upsertVoice(onlineEmoji, `${onlineEmoji} Players Online: ${count}`, 'Players Online:');
+  const roomsChannel = await upsertVoice(roomsEmoji, `${roomsEmoji} In Rooms: ${inRooms}`, 'In Rooms:');
 
   return { count, inRooms, category, onlineChannel, roomsChannel };
 }
