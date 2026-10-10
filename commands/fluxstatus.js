@@ -67,6 +67,26 @@ async function updateStatusChannels(guild) {
     }
   }
 
+  // v7.7: Position the status category ABOVE the main FLUX REC category.
+  // Armin's order: FLUX REC STATUS must be above FLUX REC (main).
+  try {
+    const allCats = guild.channels.cache
+      .filter((c) => c.type === ChannelType.GuildCategory)
+      .sort((a, b) => a.position - b.position);
+    // Find the main FLUX REC category (not the status one)
+    const mainCat = allCats.find((c) => {
+      const n = (c.name || '').toLowerCase();
+      return n.includes('flux rec') && !n.includes('status');
+    });
+    if (mainCat && category.position > mainCat.position) {
+      // Move status category to just above the main category
+      await category.setPosition(mainCat.position);
+      console.log('[fluxstatus] moved status category above main FLUX REC');
+    }
+  } catch (err) {
+    console.error('[fluxstatus] could not reposition category:', err.message);
+  }
+
   const inCategory = (prefix) =>
     guild.channels.cache.find(
       (c) => c.parentId === category.id && String(c.name || '').startsWith(prefix)
