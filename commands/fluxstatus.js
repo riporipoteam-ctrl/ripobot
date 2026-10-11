@@ -4,7 +4,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('disco
 const { isOwnerOrCoOwner, adminApi } = require('../utils/flux');
 const { normalizeChannelName } = require('../utils/modreport');
 
-const STATUS_CATEGORY_NAME = 'Flux Rec Status';
+const STATUS_CATEGORY_NAME = '| Server Status |';
 const ONLINE_PREFIX = '🟢';
 const ROOMS_PREFIX = '🎮';
 
