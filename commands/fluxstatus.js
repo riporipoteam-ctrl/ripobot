@@ -19,6 +19,8 @@ function staffRoles(guild) {
 function categoryOverwrites(guild) {
   // v7.8: Everyone can SEE the status (Armin's order) — but cannot join the
   // voice channels (they're status displays, not real voice channels).
+  // v7.10: The bot itself MUST have an explicit allow overwrite, otherwise
+  // "Missing Access" when the category is private and the bot isn't listed.
   const overwrites = [
     {
       id: guild.roles.everyone.id,
@@ -26,6 +28,21 @@ function categoryOverwrites(guild) {
       deny: [PermissionFlagsBits.Connect],
     },
   ];
+  // Bot's own role: allow View + Manage so it can update channel names.
+  // Find the bot's role (the managed role for this application).
+  const botRole = guild.roles.cache.find(
+    (r) => r.managed && r.members.has(guild.client.user.id)
+  );
+  if (botRole) {
+    overwrites.push({
+      id: botRole.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.Connect,
+      ],
+    });
+  }
   for (const [, role] of staffRoles(guild)) {
     overwrites.push({
       id: role.id,
