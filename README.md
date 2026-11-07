@@ -100,6 +100,7 @@ pm2 save
 |---|---|---|
 | `/announce <channel> <title> <message> [ping_role]` | 👑 Owner / 🛡️ Co-Owner roles | Styled embed announcement |
 | `/fluxannounce <title> <description> [image]` | 👑 Owner / 🛡️ Co-Owner / Discord Administrator | Publish to Flux Rec's Official tab with an optional PNG/JPEG image |
+| `/fluxloadingscreen set <title> <description> <image>` / `/fluxloadingscreen clear` | 👑 Owner / 🛡️ Co-Owner / Discord Administrator | Set a global room-switch screen (PNG/JPEG, up to 4 MB), or restore each room's saved screen |
 | `/fluxlevel <username> <level>` | 👑 Owner / 🛡️ Co-Owner | Set a Flux Rec player's level from 1–50; resets XP within the level to 0 |
 
 ### 🎲 Fun
