@@ -3,9 +3,9 @@
 /**
  * Shared helpers for the Flux Rec admin commands.
  *
- * All Flux Rec admin actions are gated to Owner + Co-Owner (same check the
- * individual flux*.js commands use) and go through the backend admin API
- * with the FLUXREC_ADMIN_KEY secret (set on the HF Space).
+ * Flux Rec admin actions go through the backend admin API with the
+ * FLUXREC_ADMIN_KEY secret (set on the HF Space). Player-management commands
+ * are Owner/Co-Owner only; Official announcements also allow Discord admins.
  *
  * Backend base: https://api.ripo-ripoteam.workers.dev/api/admin/v1
  * DTOs mirror apps/api/src/routes/admin.ts exactly — do not invent fields.
@@ -80,6 +80,39 @@ async function adminApi(path, method, body) {
       'X-Admin-Key': key,
     },
     body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new FluxApiError(
+      data.error || data.message || `API error: ${res.status}`,
+      res.status
+    );
+  }
+  return data;
+}
+
+/** Create a durable Official-tab announcement and push it to online clients. */
+async function createFluxAnnouncement({ title, body, image }) {
+  const key = process.env.FLUXREC_ADMIN_KEY;
+  if (!key) {
+    throw new FluxApiError('Admin API key not configured (FLUXREC_ADMIN_KEY)', 0);
+  }
+
+  const form = new FormData();
+  form.set('title', title);
+  form.set('body', body);
+  if (image) {
+    form.set(
+      'image',
+      new Blob([image.bytes], { type: image.contentType }),
+      image.filename
+    );
+  }
+
+  const res = await fetch(`${ADMIN_API}/announcements/create`, {
+    method: 'POST',
+    headers: { 'X-Admin-Key': key },
+    body: form,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -198,6 +231,7 @@ module.exports = {
   rankLabel,
   isOwnerOrCoOwner,
   adminApi,
+  createFluxAnnouncement,
   FluxApiError,
   isNoSuchPlayer,
   searchPlayers,

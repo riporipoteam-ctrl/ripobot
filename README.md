@@ -58,11 +58,10 @@ npm install
 node deploy-commands.js
 ```
 
-This registers all 23 commands as **guild commands** (they appear instantly,
-no hour-long wait like global commands).
-
-> ⚠️ Re-run this after every update that adds or changes commands —
-> the hosted bot only runs `node index.js`, it does not re-deploy commands itself.
+This registers every command in `commands/` as a **guild command**. The bot also
+refreshes the guild command list on startup when `CLIENT_ID` and `GUILD_ID` are
+configured, so new commands such as `/fluxannounce` appear after the hosted bot
+restarts.
 
 ## 5. Run
 
@@ -100,6 +99,7 @@ pm2 save
 | Command | Permission | What it does |
 |---|---|---|
 | `/announce <channel> <title> <message> [ping_role]` | 👑 Owner / 🛡️ Co-Owner roles | Styled embed announcement |
+| `/fluxannounce <title> <description> [image]` | 👑 Owner / 🛡️ Co-Owner / Discord Administrator | Publish to Flux Rec's Official tab with an optional PNG/JPEG image |
 
 ### 🎲 Fun
 
