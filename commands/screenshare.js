@@ -3,10 +3,20 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { isOwnerOrCoOwner, adminApi, isNoSuchPlayer } = require('../utils/flux');
 
+async function mayManageScreenShare(interaction) {
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) return true;
+
+  // Role-based owners may not carry Discord's Administrator permission.
+  const member = interaction.member?.roles?.cache
+    ? interaction.member
+    : await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+  return isOwnerOrCoOwner(member);
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('screenshare')
-    .setDescription('Allow or deny in-game screen sharing for a Flux Rec player')
+    .setDescription('Allow or deny in-game screen sharing for a Flux Rec player (staff only)')
     .addStringOption((option) =>
       option.setName('username').setDescription('Flux Rec username').setRequired(true)
     )
@@ -20,13 +30,12 @@ module.exports = {
           { name: 'Deny', value: 'deny' }
         )
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false),
 
   async execute(interaction) {
-    if (!isOwnerOrCoOwner(interaction.member)) {
+    if (!(await mayManageScreenShare(interaction))) {
       await interaction.reply({
-        content: '❌ Only the Owner and Co-Owner can use this command.',
+        content: '❌ Only the Owner, Co-Owner, or a Discord Administrator can use this command.',
         ephemeral: true,
       });
       return;

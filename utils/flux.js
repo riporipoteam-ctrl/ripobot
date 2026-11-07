@@ -124,6 +124,37 @@ async function createFluxAnnouncement({ title, body, image }) {
   return data;
 }
 
+/** Set the global room-load screen used by the rooms worker on room lookup. */
+async function setFluxLoadingScreen({ title, subtitle, image }) {
+  const key = process.env.FLUXREC_ADMIN_KEY;
+  if (!key) {
+    throw new FluxApiError('Admin API key not configured (FLUXREC_ADMIN_KEY)', 0);
+  }
+  const form = new FormData();
+  form.set('title', title);
+  form.set('subtitle', subtitle);
+  form.set('image', new Blob([image.bytes], { type: image.contentType }), image.filename);
+
+  const res = await fetch(`${ADMIN_API}/loading-screen/set`, {
+    method: 'POST',
+    headers: { 'X-Admin-Key': key },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new FluxApiError(
+      data.error || data.message || `API error: ${res.status}`,
+      res.status
+    );
+  }
+  return data;
+}
+
+/** Remove the global screen so each room's own saved load screen appears again. */
+async function clearFluxLoadingScreen() {
+  return adminApi('/loading-screen/clear', 'POST', {});
+}
+
 /** True when the error means "no Flux Rec account with that username". */
 function isNoSuchPlayer(err) {
   return err instanceof FluxApiError && err.status === 404;
@@ -232,6 +263,8 @@ module.exports = {
   isOwnerOrCoOwner,
   adminApi,
   createFluxAnnouncement,
+  setFluxLoadingScreen,
+  clearFluxLoadingScreen,
   FluxApiError,
   isNoSuchPlayer,
   searchPlayers,

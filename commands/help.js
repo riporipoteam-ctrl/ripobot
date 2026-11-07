@@ -20,6 +20,10 @@ const GROUPS = [
     '📢 Owner',
     [
       ['/announce `<channel> <title> <message> [ping_role] [image]`', 'Post a styled announcement (👑 Owner / 🛡️ Co-Owner only).'],
+      ['/fluxannounce `<title> <description> [image]`', 'Publish to Flux Rec players (Owner / Co-Owner / Discord Administrator).'],
+      ['/fluxloadingscreen set `<title> <description> <image>`', 'Set the global room-switch screen; `/fluxloadingscreen clear` restores room screens.'],
+      ['/screenshare `<username> <allow|deny>`', 'Grant or remove a player’s in-game screen-sharing access (staff only).'],
+      ['/fluxlevel `<username> <level>`', 'Set a Flux Rec player’s level from 1–50 (Owner / Co-Owner).'],
     ],
   ],
   [
