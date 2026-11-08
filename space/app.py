@@ -199,4 +199,10 @@ with gr.Blocks(title="RipoBot") as demo:
     btn = gr.Button("Refresh status")
     btn.click(lambda: status["line"], outputs=box)
 
+# The Roomie endpoint is opt-in and does not alter the bot or status page.
+# Missing token leaves it disabled; the model is loaded only on first request.
+if os.environ.get("ROOMIE_VOICE_TOKEN"):
+    from roomie_voice import attach_voice_endpoint
+    attach_voice_endpoint(demo.app)
+
 demo.launch(server_name="0.0.0.0", server_port=7860)
